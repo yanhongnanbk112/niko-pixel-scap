@@ -1,132 +1,201 @@
-import requests
-from bs4 import BeautifulSoup
 import os
 import json
+import csv
 import re
+from datetime import datetime
 
-# --- CONFIGURATION ---
+# --- KHU VỰC IMPORT ---
+# 1. 'cffi' để giả lập trình duyệt (Scraping)
+from curl_cffi import requests as cffi 
+# 2. 'requests' thường để gửi API Telegram (Gửi ảnh)
+import requests 
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+# Load cấu hình
+load_dotenv()
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+
+# --- CẤU HÌNH ---
 HISTORY_FILE = 'price_history.json'
+LOG_FILE = 'price_log.csv'
 TARGET_URL = "https://sonpixel.vn/danh-muc-san-pham/dien-thoai/google-pixel/pixel-9-series/pixel-9/"
-TARGET_PRICE = 10900000  # Alert if price < 10.9 Million
+TARGET_PRICE = 10900000 
+IMG_FILE = 'price_chart.png'
 
-# --- PASTE HEADERS HERE ---
-# Copy the User-Agent and Cookie from your Network Tab (HAR)
-# This is critical to look like a real browser.
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-    # 'Cookie': 'PASTE_YOUR_COOKIE_STRING_HERE_IF_NEEDED' 
-}
+def send_telegram_photo(caption):
+    """Gửi ảnh qua Telegram dùng thư viện requests thường"""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
 
-def send_telegram(message):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("!! Telegram tokens not found in ENV")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    
     try:
-        requests.post(url, json=payload, timeout=10)
+        with open(IMG_FILE, 'rb') as photo:
+            payload = {'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
+            files = {'photo': photo}
+            requests.post(url, data=payload, files=files, timeout=20)
+            print("   >>> 📸 Đã gửi biểu đồ qua Telegram!")
     except Exception as e:
-        print(f"Failed to send Telegram: {e}")
+        print(f"Lỗi gửi ảnh: {e}")
+
+def send_telegram_text(message):
+    """Gửi text qua Telegram"""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'Markdown'}, timeout=10)
+    except Exception as e:
+        print(f"Lỗi gửi tin nhắn: {e}")
 
 def clean_price(price_str):
     if not price_str: return 0
-    # Remove dots, 'd', 'VND', and whitespace
     digits = re.sub(r'\D', '', price_str)
     return int(digits) if digits else 0
+
+def log_to_csv(title, price):
+    file_exists = os.path.isfile(LOG_FILE)
+    with open(LOG_FILE, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if not file_exists: writer.writerow(['Date', 'Product', 'Price'])
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        writer.writerow([now, title, price])
+
+def draw_chart():
+    try:
+        if not os.path.exists(LOG_FILE): return False
+        
+        df = pd.read_csv(LOG_FILE)
+        df['Date'] = pd.to_datetime(df['Date'])
+        
+        plt.figure(figsize=(10, 5))
+        
+        for product_name in df['Product'].unique():
+            subset = df[df['Product'] == product_name].sort_values('Date')
+            if len(subset) > 0:
+                plt.plot(subset['Date'], subset['Price'], marker='o', label=product_name)
+
+        plt.title('Biến động giá Pixel 9 (SonPixel)')
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.legend(fontsize='small')
+        
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d/%m'))
+        plt.gcf().autofmt_xdate()
+        plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: format(int(x), ',')))
+        
+        plt.tight_layout()
+        plt.savefig(IMG_FILE)
+        plt.close()
+        return True
+    except Exception as e:
+        print(f"Lỗi vẽ biểu đồ: {e}")
+        return False
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
         try:
-            with open(HISTORY_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
+            with open(HISTORY_FILE, 'r') as f: return json.load(f)
+        except: return {}
     return {}
 
 def save_history(history):
-    with open(HISTORY_FILE, 'w') as f:
-        json.dump(history, f, indent=2)
+    with open(HISTORY_FILE, 'w') as f: json.dump(history, f, indent=2)
 
 def main():
-    print(f"🚀 Starting SonPixel Scraper for Pixel 9...")
+    print(f"🚀 Đang chạy SonPixel Scraper (Clean Mode)...")
     
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    # --- 1. VƯỢT TƯỜNG LỬA (ROTATION STRATEGY) ---
+    browsers = ["chrome110", "edge101", "safari15_5"]
+    response = None
     
-    try:
-        response = session.get(TARGET_URL, timeout=20)
-        response.raise_for_status()
-    except Exception as e:
-        print(f"❌ Network Error: {e}")
+    for browser in browsers:
+        print(f"   🎭 Đang thử giả dạng: {browser}...")
+        try:
+            response = cffi.get(
+                TARGET_URL, 
+                impersonate=browser, 
+                headers={"Referer": "https://www.google.com/"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                print(f"   ✅ Thành công với: {browser}")
+                break 
+            elif response.status_code == 403:
+                print(f"   ❌ {browser} bị chặn (403).")
+            else:
+                print(f"   ⚠️ Lỗi khác: {response.status_code}")
+                
+        except Exception as e:
+            print(f"   ⚠️ Lỗi kết nối khi thử {browser}: {e}")
+
+    if not response or response.status_code != 200:
+        print("❌ TẤT CẢ ĐỀU THẤT BẠI. IP của bạn có thể đã bị chặn tạm thời.")
         return
 
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    # Select all product cards in the grid
-    products = soup.select('.product-small')
-    print(f"🔎 Found {len(products)} products on page.")
+    # --- 2. XỬ LÝ DỮ LIỆU ---
+    try:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        products = soup.select('.product-small')
+        print(f"🔎 Tìm thấy {len(products)} thành phần HTML (chưa lọc).")
+        
+        history = load_history()
+        deal_info = []
+        
+        # --- FIX: Tạo set để lọc trùng lặp ---
+        seen_titles = set()
 
-    history = load_history()
-    deals_found = False
+        for product in products:
+            try:
+                title_el = product.select_one('.woocommerce-loop-product__title')
+                if not title_el: continue
+                title = title_el.get_text().strip()
 
-    for product in products:
-        try:
-            # Extract Title
-            title_el = product.select_one('.woocommerce-loop-product__title')
-            if not title_el: continue
-            title = title_el.get_text().strip()
+                # --- BƯỚC LỌC TRÙNG ---
+                if title in seen_titles:
+                    continue # Nếu đã gặp tên này rồi thì bỏ qua ngay
+                seen_titles.add(title) # Đánh dấu là đã gặp
 
-            # Filter: STRICTLY Pixel 9 (No Pro, No Lock if desired)
-            if "Pixel 9" not in title:
-                continue
-            if "Pro" in title: # Skip Pro models
-                continue
-            if "Lock" in title: # User Requirement: Banking apps need clean machine
-                print(f"   Skip (Lock): {title}")
-                continue
+                # --- BỘ LỌC TỪ KHÓA ---
+                if "Pixel 9" not in title or "Pro" in title or "Lock" in title: continue
 
-            # Extract Price
-            # Looks for <span class="woocommerce-Price-amount amount"><bdi>14.490.000...
-            price_el = product.select_one('.price .woocommerce-Price-amount bdi')
-            if not price_el:
-                # Sometimes it's a range, just grab the first text
-                price_el = product.select_one('.price')
-            
-            raw_price = price_el.get_text() if price_el else "0"
-            price = clean_price(raw_price)
+                # --- LẤY GIÁ ---
+                price_el = product.select_one('.price .woocommerce-Price-amount bdi') or product.select_one('.price')
+                price = clean_price(price_el.get_text() if price_el else "0")
 
-            print(f"   Checked: {title} - {price:,} VND")
+                if price > 0:
+                    log_to_csv(title, price)
+                    print(f"   ✅ {title}: {price:,} đ")
 
-            # --- LOGIC: DEAL DETECTION ---
-            # 1. Price is valid (> 5M) and Cheap (< TARGET)
-            if 5000000 < price < TARGET_PRICE:
-                last_seen_price = history.get(title, 99999999)
+                # --- LOGIC ALERT ---
+                if 5000000 < price < TARGET_PRICE:
+                    last_price = history.get(title, 99999999)
+                    if price < last_price:
+                        deal_info.append(f"📱 **{title}**: {price:,}đ (Giảm từ {last_price:,}đ)")
                 
-                # Only alert if price dropped OR it's the first time seeing this deal
-                if price < last_seen_price:
-                    msg = (
-                        f"🔥 **DEAL ALERT: SonPixel**\n"
-                        f"📦 **{title}**\n"
-                        f"💰 **{price:,} VND**\n"
-                        f"📉 (Old: {last_seen_price:,} VND)\n"
-                        f"👉 [Buy Now]({TARGET_URL})"
-                    )
-                    send_telegram(msg)
-                    print(f"   >>> ALERT SENT for {title}")
-                    deals_found = True
+                history[title] = price
+            except: continue
+
+        save_history(history)
+
+        # Gửi báo cáo
+        if deal_info:
+            print("🔥 Phát hiện Deal! Đang xử lý báo cáo...")
+            has_chart = draw_chart()
+            caption = "🚨 **PHÁT HIỆN GIÁ GIẢM!**\n\n" + "\n".join(deal_info) + f"\n\n👉 [Xem ngay]({TARGET_URL})"
             
-            # Update history regardless to keep state fresh
-            history[title] = price
+            if has_chart:
+                send_telegram_photo(caption)
+            else:
+                send_telegram_text(caption)
 
-        except Exception as e:
-            print(f"Error parsing item: {e}")
+        print("✅ Hoàn tất.")
 
-    save_history(history)
-    print("✅ Done.")
+    except Exception as e:
+        print(f"❌ Lỗi xử lý HTML: {e}")
 
 if __name__ == "__main__":
     main()

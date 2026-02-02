@@ -1,0 +1,37 @@
+name: Pixel Hunter
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Chạy vào phút thứ 15 của mỗi giờ
+  workflow_dispatch: # Cho phép bấm nút chạy tay để test
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # QUAN TRỌNG: Cấp quyền ghi file history.json
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Scraper
+        env:
+          # GitHub sẽ lấy token từ kho Secrets (Bước 4)
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Commit Price History
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "update: price history snapshot"
+          file_pattern: price_history.json
