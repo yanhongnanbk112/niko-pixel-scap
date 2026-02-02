@@ -16,17 +16,21 @@ import matplotlib.dates as mdates
 load_dotenv()
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
-
+# --- CẤU HÌNH BÍ MẬT ---
+# Thay thế dòng URL cũ bằng dòng này:
+TARGET_URL = os.environ.get('TARGET_URL')
+# Kiểm tra an toàn: Nếu quên cài đặt thì báo lỗi ngay để biết
+if not TARGET_URL:
+    raise ValueError("❌ LỖI: Chưa cấu hình biến môi trường 'TARGET_URL'")
 # --- CẤU HÌNH ---
-HISTORY_FILE = 'price_history.json'
 LOG_FILE = 'price_log.csv'
-TARGET_URL = "https://sonpixel.vn/danh-muc-san-pham/dien-thoai/google-pixel/pixel-9-series/pixel-9/"
+HISTORY_FILE = 'price_history.json'
 IMG_FILE = 'price_chart.png'
 
 # --- DANH SÁCH SELECTOR DỰ PHÒNG ---
 # Nếu cái đầu không được, nó sẽ thử cái thứ 2, thứ 3...
 PRODUCT_SELECTORS = [
-    '.product-small',                # Theme Flatsome hiện tại (SonPixel đang dùng)
+    '.product-small',                # Theme Flatsome hiện tại (Website đang dùng)
     '.type-product',                 # Chuẩn WooCommerce (Dự phòng nếu đổi theme)
     '.product-item',                 # Một số theme phổ biến khác
     'div[class*="product"]'          # Quét tất cả thẻ div có chữ "product" (Tuyệt chiêu cuối)
@@ -109,7 +113,7 @@ def save_history(history):
     with open(HISTORY_FILE, 'w') as f: json.dump(history, f, indent=2)
 
 def main():
-    print(f"🚀 Đang chạy SonPixel Scraper (Robust Mode)...")
+    print(f"🚀 Đang chạy Google Pixel Scraper (Robust Mode)...")
     
     # 1. VƯỢT TƯỜNG LỬA
     browsers = ["chrome110", "edge101", "safari15_5"]
@@ -129,7 +133,7 @@ def main():
 
     if not response or response.status_code != 200:
         print("❌ LỖI MẠNG/403.")
-        send_telegram_alert("Bot không thể truy cập vào SonPixel (Lỗi mạng hoặc bị chặn IP).")
+        send_telegram_alert("Bot không thể truy cập vào Website (Lỗi mạng hoặc bị chặn IP).")
         return
 
     # 2. XỬ LÝ HTML THÔNG MINH (Smart Selectors)
@@ -155,7 +159,7 @@ def main():
         send_telegram_alert(
             "⚠️ Layout web đã thay đổi!\n"
             "Bot không tìm thấy sản phẩm nào cả.\n"
-            "Hãy kiểm tra lại class CSS trên SonPixel."
+            "Hãy kiểm tra lại class CSS trên Website."
         )
         return
 
@@ -201,7 +205,7 @@ def main():
         print("🚀 Đang gửi báo cáo...")
         has_chart = draw_chart()
         caption = (
-            f"📊 **BÁO CÁO GIÁ SONPIXEL**\n"
+            f"📊 **BÁO CÁO GIÁ**\n"
             "--------------------------------\n" 
             + "\n".join(report_lines) 
             + f"\n--------------------------------\n👉 [Xem ngay]({TARGET_URL})"
