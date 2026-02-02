@@ -2,17 +2,14 @@ name: Pixel Hunter Daily Report
 
 on:
   schedule:
-    # Chạy lúc 02:00 UTC hàng ngày (= 09:00 sáng Việt Nam)
-    - cron: '0 2 * * *'
-  
-  # Giữ nút này để bạn có thể bấm chạy tay bất cứ lúc nào để test
-  workflow_dispatch: 
+    - cron: '0 2 * * *' # 09:00 AM UTC+7
+  workflow_dispatch:
 
 jobs:
   hunt:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Cấp quyền để Bot tự ghi file log vào kho code
+      contents: write
       
     steps:
       - name: Checkout code
@@ -21,14 +18,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11' # Đã cập nhật lên 3.11 để fix lỗi thư viện
 
       - name: Install dependencies
+        # Xóa các phiên bản cứng trong requirements.txt để tránh lỗi
         run: pip install -r requirements.txt
 
       - name: Run Scraper
         env:
-          # Bot sẽ lấy Token bí mật từ Settings của Repo
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
@@ -37,4 +34,5 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "update: daily price report"
-          file_pattern: "*.json *.csv" # Lưu lại cả file history và file log CSV
+          # QUAN TRỌNG: Đổi thành dấu chấm (.) để lưu TẤT CẢ file thay đổi
+          file_pattern: .
