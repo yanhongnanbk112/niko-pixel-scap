@@ -28,6 +28,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_URL: ${{ secrets.TARGET_URL }}
         run: python main.py
 
       - name: Commit Price History
