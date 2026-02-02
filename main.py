@@ -5,9 +5,7 @@ import re
 from datetime import datetime
 
 # --- KHU VỰC IMPORT ---
-# 1. 'cffi' để giả lập trình duyệt (Scraping)
 from curl_cffi import requests as cffi 
-# 2. 'requests' thường để gửi API Telegram (Gửi ảnh)
 import requests 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -24,15 +22,13 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 HISTORY_FILE = 'price_history.json'
 LOG_FILE = 'price_log.csv'
 TARGET_URL = "https://sonpixel.vn/danh-muc-san-pham/dien-thoai/google-pixel/pixel-9-series/pixel-9/"
-TARGET_PRICE = 10900000 
 IMG_FILE = 'price_chart.png'
 
-def send_telegram_photo(caption):
-    """Gửi ảnh qua Telegram dùng thư viện requests thường"""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
+# (Đã bỏ TARGET_PRICE vì bạn muốn nhận tin nhắn bất kể giá nào)
 
+def send_telegram_photo(caption):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    
     try:
         with open(IMG_FILE, 'rb') as photo:
             payload = {'chat_id': TELEGRAM_CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
@@ -43,11 +39,11 @@ def send_telegram_photo(caption):
         print(f"Lỗi gửi ảnh: {e}")
 
 def send_telegram_text(message):
-    """Gửi text qua Telegram"""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
         requests.post(url, json={'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'Markdown'}, timeout=10)
+        print("   >>> 💬 Đã gửi tin nhắn qua Telegram!")
     except Exception as e:
         print(f"Lỗi gửi tin nhắn: {e}")
 
@@ -105,9 +101,9 @@ def save_history(history):
     with open(HISTORY_FILE, 'w') as f: json.dump(history, f, indent=2)
 
 def main():
-    print(f"🚀 Đang chạy SonPixel Scraper (Clean Mode)...")
+    print(f"🚀 Đang chạy SonPixel Scraper (Chế độ: Báo cáo đầy đủ)...")
     
-    # --- 1. VƯỢT TƯỜNG LỬA (ROTATION STRATEGY) ---
+    # 1. VƯỢT TƯỜNG LỬA
     browsers = ["chrome110", "edge101", "safari15_5"]
     response = None
     
@@ -120,32 +116,27 @@ def main():
                 headers={"Referer": "https://www.google.com/"},
                 timeout=30
             )
-            
             if response.status_code == 200:
                 print(f"   ✅ Thành công với: {browser}")
                 break 
             elif response.status_code == 403:
                 print(f"   ❌ {browser} bị chặn (403).")
-            else:
-                print(f"   ⚠️ Lỗi khác: {response.status_code}")
-                
         except Exception as e:
-            print(f"   ⚠️ Lỗi kết nối khi thử {browser}: {e}")
+            print(f"   ⚠️ Lỗi kết nối: {e}")
 
     if not response or response.status_code != 200:
-        print("❌ TẤT CẢ ĐỀU THẤT BẠI. IP của bạn có thể đã bị chặn tạm thời.")
+        print("❌ TẤT CẢ ĐỀU THẤT BẠI.")
+        send_telegram_text("⚠️ Bot báo lỗi: Không thể truy cập SonPixel (Lỗi 403/Mạng).")
         return
 
-    # --- 2. XỬ LÝ DỮ LIỆU ---
+    # 2. XỬ LÝ DỮ LIỆU
     try:
         soup = BeautifulSoup(response.content, 'html.parser')
         products = soup.select('.product-small')
-        print(f"🔎 Tìm thấy {len(products)} thành phần HTML (chưa lọc).")
+        print(f"🔎 Tìm thấy {len(products)} thành phần HTML.")
         
         history = load_history()
-        deal_info = []
-        
-        # --- FIX: Tạo set để lọc trùng lặp ---
+        report_lines = [] # Danh sách chứa thông tin để gửi báo cáo
         seen_titles = set()
 
         for product in products:
@@ -154,48 +145,53 @@ def main():
                 if not title_el: continue
                 title = title_el.get_text().strip()
 
-                # --- BƯỚC LỌC TRÙNG ---
-                if title in seen_titles:
-                    continue # Nếu đã gặp tên này rồi thì bỏ qua ngay
-                seen_titles.add(title) # Đánh dấu là đã gặp
+                if title in seen_titles: continue 
+                seen_titles.add(title)
 
-                # --- BỘ LỌC TỪ KHÓA ---
                 if "Pixel 9" not in title or "Pro" in title or "Lock" in title: continue
 
-                # --- LẤY GIÁ ---
                 price_el = product.select_one('.price .woocommerce-Price-amount bdi') or product.select_one('.price')
                 price = clean_price(price_el.get_text() if price_el else "0")
 
                 if price > 0:
                     log_to_csv(title, price)
                     print(f"   ✅ {title}: {price:,} đ")
-
-                # --- LOGIC ALERT ---
-                if 5000000 < price < TARGET_PRICE:
-                    last_price = history.get(title, 99999999)
-                    if price < last_price:
-                        deal_info.append(f"📱 **{title}**: {price:,}đ (Giảm từ {last_price:,}đ)")
+                    
+                    # --- THAY ĐỔI CHÍNH Ở ĐÂY ---
+                    # Không kiểm tra điều kiện giá rẻ nữa.
+                    # Luôn luôn thêm vào báo cáo.
+                    report_lines.append(f"📱 **{title}**: {price:,} đ")
                 
                 history[title] = price
             except: continue
 
         save_history(history)
 
-        # Gửi báo cáo
-        if deal_info:
-            print("🔥 Phát hiện Deal! Đang xử lý báo cáo...")
+        # 3. GỬI BÁO CÁO TELEGRAM (Luôn gửi nếu có dữ liệu)
+        if report_lines:
+            print("🚀 Đang chuẩn bị gửi tin nhắn Telegram...")
             has_chart = draw_chart()
-            caption = "🚨 **PHÁT HIỆN GIÁ GIẢM!**\n\n" + "\n".join(deal_info) + f"\n\n👉 [Xem ngay]({TARGET_URL})"
+            
+            # Tạo nội dung tin nhắn
+            today_str = datetime.now().strftime("%d/%m %H:%M")
+            caption = (
+                f"📊 **BÁO CÁO GIÁ SONPIXEL** ({today_str})\n"
+                "--------------------------------\n" 
+                + "\n".join(report_lines) 
+                + f"\n--------------------------------\n👉 [Xem chi tiết]({TARGET_URL})"
+            )
             
             if has_chart:
                 send_telegram_photo(caption)
             else:
                 send_telegram_text(caption)
+        else:
+            print("⚠️ Không tìm thấy sản phẩm nào để báo cáo.")
 
         print("✅ Hoàn tất.")
 
     except Exception as e:
-        print(f"❌ Lỗi xử lý HTML: {e}")
+        print(f"❌ Lỗi xử lý: {e}")
 
 if __name__ == "__main__":
     main()

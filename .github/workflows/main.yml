@@ -1,15 +1,18 @@
-name: Pixel Hunter
+name: Pixel Hunter Daily Report
 
 on:
   schedule:
-    - cron: '0 2 * * *' # Chạy vào phút thứ 15 của mỗi giờ
-  workflow_dispatch: # Cho phép bấm nút chạy tay để test
+    # Chạy lúc 02:00 UTC hàng ngày (= 09:00 sáng Việt Nam)
+    - cron: '0 2 * * *'
+  
+  # Giữ nút này để bạn có thể bấm chạy tay bất cứ lúc nào để test
+  workflow_dispatch: 
 
 jobs:
   hunt:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # QUAN TRỌNG: Cấp quyền ghi file history.json
+      contents: write # Cấp quyền để Bot tự ghi file log vào kho code
       
     steps:
       - name: Checkout code
@@ -25,7 +28,7 @@ jobs:
 
       - name: Run Scraper
         env:
-          # GitHub sẽ lấy token từ kho Secrets (Bước 4)
+          # Bot sẽ lấy Token bí mật từ Settings của Repo
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
@@ -33,5 +36,5 @@ jobs:
       - name: Commit Price History
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "update: price history snapshot"
-          file_pattern: price_history.json
+          commit_message: "update: daily price report"
+          file_pattern: "*.json *.csv" # Lưu lại cả file history và file log CSV
